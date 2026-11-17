@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>FinaPro — Gestão Financeira para Autônomos</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>FinaPro</h1>
+        <span class="badge">Gestão Autônomo</span>
+    </header>
+
+    <!-- ABA 1: PAINEL -->
+    <div id="painel" class="section active">
+        <div class="hero-card">
+            <div class="hero-label">Lucro Líquido do Mês</div>
+            <div class="hero-value {{ 'green' if lucro_mes >= 0 else 'red' }}">
+                R$ {{ "%.2f"|format(lucro_mes) }}
+            </div>
+            <div class="grid-2">
+                <div class="mini-stat">
+                    <small>Faturamento</small>
+                    <strong class="green">+ R$ {{ "%.2f"|format(ganhos_mes) }}</strong>
+                </div>
+                <div class="mini-stat">
+                    <small>Despesas</small>
+                    <strong class="red">- R$ {{ "%.2f"|format(gastos_mes) }}</strong>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Meta Diária ({{ hoje }})</h2>
+            <div style="display:flex; justify-content:space-between; font-size:0.85rem;">
+                <span>Resultado hoje: <strong>R$ {{ "%.2f"|format(lucro_hoje) }}</strong></span>
+                <span>Meta: <strong>R$ {{ "%.2f"|format(meta_diaria) }}</strong></span>
+            </div>
+            <div class="progress-bg">
+                <div class="progress-fill" style="width: {{ progresso }}%;"></div>
+            </div>
+            <small style="color:var(--muted);">{{ "%.0f"|format(progresso) }}% concluído</small>
+
+            <form action="{{ url_for('main.atualizar_meta') }}" method="POST" style="flex-direction:row; margin-top:12px;">
+                <input type="number" step="0.01" name="meta_diaria" placeholder="Nova meta diária (R$)" required style="flex:1;">
+                <button type="submit" class="secondary" style="width:auto; padding:0 16px;">Salvar</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Novo Lançamento Avulso</h2>
+            <form action="{{ url_for('main.add_transacao') }}" method="POST">
+                <select name="tipo" required>
+                    <option value="ganho">Receita (Honorários / Serviços / Vendas)</option>
+                    <option value="gasto">Despesa (Operacional / Impostos / Pessoal)</option>
+                </select>
+                <select name="categoria" required>
+                    <optgroup label="Receitas">
+                        <option value="Honorários / Serviços">Honorários / Serviços</option>
+                        <option value="Consultoria / Projetos">Consultoria / Projetos</option>
+                        <option value="Comissões / Vendas">Comissões / Vendas</option>
+                        <option value="Receita Extra">Receita Extra</option>
+                    </optgroup>
+                    <optgroup label="Despesas">
+                        <option value="Operacional / Escritório">Operacional / Escritório</option>
+                        <option value="Impostos / DAS / Taxas">Impostos / DAS / Taxas</option>
+                        <option value="Software / Assinaturas">Software / Assinaturas</option>
+                        <option value="Deslocamento / Combustível">Deslocamento / Combustível</option>
+                        <option value="Marketing / Captação">Marketing / Captação</option>
+                        <option value="Despesa Pessoal">Despesa Pessoal</option>
+                    </optgroup>
+                </select>
+                <input type="text" name="descricao" placeholder="Descrição (ex: Consulta avulsa, Guia DAS)">
+                <input type="number" step="0.01" name="valor" placeholder="Valor (R$)" required>
+                <input type="date" name="data" value="{{ hoje }}" required>
+                <button type="submit" class="primary">Registrar Lançamento</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ABA 2: CLIENTES COM BUSCA INSTANTÂNEA -->
+    <div id="clientes" class="section">
+        <div class="card">
+            <h2>Novo Contrato / Parcelamento</h2>
+            <form action="{{ url_for('main.add_recebimento') }}" method="POST">
+                <input type="text" name="cliente" placeholder="Nome do Cliente (ex: Dr. Roberto Silva)" required>
+                <input type="text" name="servico" placeholder="Serviço / Processo (ex: Ação Trabalhista)" required>
+                <input type="number" step="0.01" name="valor" placeholder="Valor de cada parcela (R$)" required>
+                <input type="number" min="1" max="48" name="parcelas" value="1" placeholder="Nº de parcelas" required>
+                <input type="date" name="vencimento" value="{{ hoje }}" required>
+                <button type="submit" class="primary">Gerar Parcelas</button>
+            </form>
+        </div>
+
+        {% if recebimentos %}
+        <div class="card">
+            <h2>Buscar Cliente ou Processo</h2>
+            <input type="search" id="buscaCliente" onkeyup="filtrarClientes()" placeholder="🔍 Digite o nome do cliente ou serviço...">
+            <div class="filter-bar">
+                <button type="button" class="filter-pill active" onclick="setFiltroStatus('todos', this)">Todos os Clientes</button>
+                <button type="button" class="filter-pill" onclick="setFiltroStatus('pendentes', this)">Com Parcela em Aberto</button>
+            </div>
+        </div>
+
+        {% for cliente, parcelas in recebimentos | groupby('cliente') %}
+        {% set ns = namespace(tem_pendente=0) %}
+        {% for p in parcelas %}
+            {% if p['recebido'] == 0 %}
+                {% set ns.tem_pendente = 1 %}
+            {% endif %}
+        {% endfor %}
+
+        <div class="card cliente-card"
+             data-busca="{{ cliente | lower }} {% for p in parcelas %}{{ p['servico'] | lower }} {% endfor %}"
+             data-pendente="{{ ns.tem_pendente }}">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid var(--border); padding-bottom:8px;">
+                <strong style="font-size:1.05rem; color:var(--green);">👤 {{ cliente }}</strong>
+                <span class="badge">{{ parcelas | length }} parcela(s)</span>
+            </div>
+
+            {% for r in parcelas %}
+            <div class="item">
+                <div class="item-info">
+                    <strong>{{ r['parcela_info'] }} • R$ {{ "%.2f"|format(r['valor']) }}</strong>
+                    <small>{{ r['servico'] }}</small>
+                    {% if r['recebido'] == 0 and r['vencimento'] < hoje %}
+                        <span class="atrasado-tag">⚠️ EM ATRASO (Venc: {{ r['vencimento'] }})</span>
+                    {% else %}
+                        <small>Vencimento: {{ r['vencimento'] }}</small>
+                    {% endif %}
+                </div>
+                <div class="actions">
+                    {% if r['recebido'] == 0 %}
+                        <form action="{{ url_for('main.pagar_recebimento', id=r['id']) }}" method="POST">
+                            <button type="submit" class="pay">Receber</button>
+                        </form>
+                    {% else %}
+                        <span class="pago-tag">PAGO</span>
+                    {% endif %}
+                    <form action="{{ url_for('main.excluir_recebimento', id=r['id']) }}" method="POST">
+                        <button type="submit" class="danger">X</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+
+        <div id="semResultadosBusca" class="card" style="display:none; text-align:center;">
+            <p style="color:var(--muted); font-size:0.85rem;">Nenhum cliente encontrado com esse filtro.</p>
+        </div>
+        {% else %}
+        <div class="card">
+            <p style="color:var(--muted); font-size:0.85rem;">Nenhum cliente cadastrado ainda.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- ABA 3: CONTAS A PAGAR -->
+    <div id="contas" class="section">
+        <div class="card">
+            <h2>Nova Conta a Pagar</h2>
+            <form action="{{ url_for('main.add_conta') }}" method="POST">
+                <input type="text" name="titulo" placeholder="Título (ex: Aluguel Sala, Anuidade OAB)" required>
+                <select name="categoria" required>
+                    <option value="Fixa">Fixa</option>
+                    <option value="Operacional / Impostos">Operacional / Impostos</option>
+                    <option value="Variável">Variável</option>
+                    <option value="Pessoal">Pessoal</option>
+                </select>
+                <input type="number" step="0.01" name="valor" placeholder="Valor (R$)" required>
+                <input type="date" name="vencimento" value="{{ hoje }}" required>
+                <button type="submit" class="secondary">Adicionar Conta</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Contas Cadastradas</h2>
+            {% for c in contas %}
+            <div class="item">
+                <div class="item-info">
+                    <strong>{{ c['titulo'] }}</strong>
+                    <small>{{ c['categoria'] }} • Venc: {{ c['vencimento'] }} • R$ {{ "%.2f"|format(c['valor']) }}</small>
+                </div>
+                <div class="actions">
+                    {% if c['pago'] == 0 %}
+                        <form action="{{ url_for('main.pagar_conta', id=c['id']) }}" method="POST">
+                            <button type="submit" class="pay">Pagar</button>
+                        </form>
+                    {% else %}
+                        <span class="pago-tag">PAGO</span>
+                    {% endif %}
+                    <form action="{{ url_for('main.excluir_conta', id=c['id']) }}" method="POST">
+                        <button type="submit" class="danger">X</button>
+                    </form>
+                </div>
+            </div>
+            {% else %}
+            <p style="color:var(--muted); font-size:0.85rem;">Nenhuma conta cadastrada.</p>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- ABA 4: HISTÓRICO -->
+    <div id="historico" class="section">
+        <div class="card">
+            <h2>Extrato de Lançamentos</h2>
+            {% for t in transacoes %}
+            <div class="item">
+                <div class="item-info">
+                    <strong class="{{ 'green' if t['tipo'] == 'ganho' else 'red' }}">
+                        {{ '+' if t['tipo'] == 'ganho' else '-' }} R$ {{ "%.2f"|format(t['valor']) }}
+                    </strong>
+                    <small>{{ t['categoria'] }} {{ '(' + t['descricao'] + ')' if t['descricao'] else '' }} • {{ t['data'] }}</small>
+                </div>
+                <form action="{{ url_for('main.excluir_transacao', id=t['id']) }}" method="POST">
+                    <button type="submit" class="danger">Excluir</button>
+                </form>
+            </div>
+            {% else %}
+            <p style="color:var(--muted); font-size:0.85rem;">Nenhuma transação registrada.</p>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- ABA 5: RELATÓRIOS -->
+    <div id="relatorios" class="section">
+        <div class="card">
+            <h2>Despesas por Categoria</h2>
+            <canvas id="graficoCategorias"></canvas>
+        </div>
+        <div class="card">
+            <h2>Faturamento vs Despesas (Mês)</h2>
+            <canvas id="graficoResumo"></canvas>
+        </div>
+    </div>
+</div>
+
+<nav class="bottom-nav">
+    <button class="tab-btn active" data-tab="painel" onclick="showTab('painel', this)">
+        <span>📊</span>
+        <span>Painel</span>
+    </button>
+    <button class="tab-btn" data-tab="clientes" onclick="showTab('clientes', this)">
+        <span>👥</span>
+        <span>Clientes</span>
+    </button>
+    <button class="tab-btn" data-tab="contas" onclick="showTab('contas', this)">
+        <span>📅</span>
+        <span>Contas</span>
+    </button>
+    <button class="tab-btn" data-tab="historico" onclick="showTab('historico', this)">
+        <span>🧾</span>
+        <span>Extrato</span>
+    </button>
+    <button class="tab-btn" data-tab="relatorios" onclick="showTab('relatorios', this)">
+        <span>📈</span>
+        <span>Gráficos</span>
+    </button>
+</nav>
+
+<script>
+    window.DADOS_FINANCEIROS = {
+        abaAtiva: {{ aba_ativa | tojson }},
+        catLabels: {{ cat_labels | tojson }},
+        catValores: {{ cat_valores | tojson }},
+        ganhosMes: {{ ganhos_mes }},
+        gastosMes: {{ gastos_mes }},
+        lucroMes: {{ lucro_mes }}
+    };
+</script>
+<script src="{{ url_for('static', filename='charts.js') }}"></script>
+</body>
+</html>
